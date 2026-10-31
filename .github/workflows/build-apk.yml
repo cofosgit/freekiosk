@@ -11,53 +11,77 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: freekiosk-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build Android APK
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 45
 
     steps:
       # 1. Checkout source code
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       # 2. Setup Node.js
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
 
-      # 3. Setup Java JDK 17
+      # 3. Generate Gradle configuration
+      - name: Configure Gradle
+        run: |
+          cat > android/gradle.properties <<'EOF'
+          # Enable AndroidX
+          android.useAndroidX=true
+
+          # Gradle JVM memory
+          org.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError
+
+          # Limit parallel builds to reduce memory usage
+          org.gradle.parallel=false
+          org.gradle.workers.max=2
+          EOF
+
+      # 4. Setup Java JDK 17
       - name: Setup Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17
           cache: gradle
 
-      # 4. Setup Android SDK
+      # 5. Setup Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
 
-      # 5. Install dependencies
+      # 6. Install Node.js dependencies
       - name: Install dependencies
         run: npm ci
 
-      # 6. Build Debug APK
-      - name: Build Debug APK
+      # 7. Build Release APK
+      - name: Build Release APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew --no-daemon --max-workers=2 assembleDebug \
-            -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError"
+          ./gradlew --no-daemon --max-workers=2 assembleRelease --stacktrace
 
-      # 7. Upload APK
+      # 8. List generated APK
+      - name: Check APK output
+        run: |
+          echo "Generated APK files:"
+          find android/app/build/outputs/apk/release -type f -name "*.apk"
+
+      # 9. Upload APK
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: FreeKiosk-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: FreeKiosk-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 14
